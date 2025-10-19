@@ -6,11 +6,15 @@
   "scripts": {
     "client:dev": "vite",
     "build": "tsc -b && vite build",
+    "build:api": "tsc -b api/tsconfig.json",
+    "build:client": "vite build",
+    "build:all": "npm run build:api && npm run build:client",
     "lint": "eslint .",
     "preview": "vite preview",
     "check": "tsc --noEmit",
     "server:dev": "nodemon",
-    "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\""
+    "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\"",
+    "start": "node api/server.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",

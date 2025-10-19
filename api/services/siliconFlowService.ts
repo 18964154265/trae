@@ -1,22 +1,46 @@
 import axios from 'axios';
 
 // SiliconFlow API配置
-const SILICONFLOW_API_URL = 'https://api.siliconflow.cn/v1';
+const SILICONFLOW_API_URL = process.env.SILICONFLOW_BASE_URL || 'https://api.siliconflow.com/v1';
 const SILICONFLOW_API_KEY = process.env.SILICONFLOW_API_KEY || '';
 
 if (!SILICONFLOW_API_KEY) {
   console.warn('警告: 缺少SiliconFlow API密钥，AI功能将不可用');
 }
 
-// API客户端配置
-const apiClient = axios.create({
-  baseURL: SILICONFLOW_API_URL,
-  headers: {
-    'Authorization': `Bearer ${SILICONFLOW_API_KEY}`,
-    'Content-Type': 'application/json'
-  },
-  timeout: 30000 // 30秒超时
-});
+// API客户端配置 - 创建多个配置用于测试不同的认证格式
+const createApiClient = (authFormat: 'bearer' | 'direct' | 'token') => {
+  let authHeader: string;
+  
+  switch (authFormat) {
+    case 'bearer':
+      authHeader = `Bearer ${SILICONFLOW_API_KEY}`;
+      break;
+    case 'direct':
+      authHeader = SILICONFLOW_API_KEY;
+      break;
+    case 'token':
+      authHeader = `Token ${SILICONFLOW_API_KEY}`;
+      break;
+    default:
+      authHeader = `Bearer ${SILICONFLOW_API_KEY}`;
+  }
+  
+  console.log(`🔧 创建API客户端 - 认证格式: ${authFormat}, Authorization: ${authHeader.substring(0, 20)}...`);
+  console.log(`🌐 Base URL: ${SILICONFLOW_API_URL}`);
+  
+  return axios.create({
+    baseURL: SILICONFLOW_API_URL,
+    headers: {
+      'Authorization': authHeader,
+      'Content-Type': 'application/json'
+    },
+    timeout: 30000 // 30秒超时
+  });
+};
+
+// 默认使用Bearer格式
+let apiClient = createApiClient('bearer');
 
 // 聊天请求接口
 interface ChatRequest {
@@ -71,81 +95,114 @@ export class SiliconFlowService {
     return { isValid: true };
   }
 
-  // AI聊天对话
+  // AI聊天对话 - 支持多种认证格式测试
   static async chat(request: ChatRequest): Promise<APIResponse> {
-    try {
-      // 验证API密钥
-      const validation = this.validateApiKey();
-      if (!validation.isValid) {
-        throw new Error(validation.error);
-      }
-
-      // 构建消息历史
-      const messages = [
-        {
-          role: 'system',
-          content: '你是一个专业的论文写作助手，擅长学术写作、研究方法和论文结构。请用中文回答，提供准确、有用的建议。'
-        }
-      ];
-
-      // 添加上下文消息
-      if (request.context && request.context.length > 0) {
-        messages.push(...request.context);
-      }
-
-      // 添加当前用户消息
-      messages.push({
-        role: 'user',
-        content: request.message
-      });
-
-      const response = await apiClient.post('/chat/completions', {
-        model: 'Qwen/Qwen2.5-7B-Instruct',
-        messages,
-        max_tokens: 2000,
-        temperature: 0.7,
-        stream: false
-      });
-
-      const choice = response.data.choices[0];
-      return {
-        content: choice.message.content,
-        usage: response.data.usage
-      };
-    } catch (error) {
-      console.error('SiliconFlow聊天API错误:', error);
-      
-      // 详细的错误日志
-      if (axios.isAxiosError(error)) {
-        console.error('请求配置:', {
-          url: error.config?.url,
-          method: error.config?.method,
-          headers: error.config?.headers,
-          baseURL: error.config?.baseURL
-        });
-        console.error('响应状态:', error.response?.status);
-        console.error('响应数据:', error.response?.data);
-        console.error('响应头:', error.response?.headers);
+    // 尝试不同的认证格式
+    const authFormats: ('bearer' | 'direct' | 'token')[] = ['direct', 'bearer', 'token'];
+    let lastError: any;
+    
+    for (const authFormat of authFormats) {
+      try {
+        console.log(`🔄 尝试认证格式: ${authFormat}`);
         
-        if (error.response?.status === 401) {
-          console.error('401错误详情 - API密钥可能无效或格式错误');
-          const validation = this.validateApiKey();
-          console.error('密钥验证结果:', validation);
-          throw new Error(`API密钥无效: ${error.response?.data || '请检查密钥格式'}`);
-        } else if (error.response?.status === 429) {
-          throw new Error('API请求频率超限，请稍后重试');
-        } else if (error.response?.status === 500) {
-          throw new Error('AI服务暂时不可用，请稍后重试');
-        } else if (error.response?.status === 403) {
-          throw new Error('API访问被拒绝，请检查密钥权限');
-        } else {
-          throw new Error(`API请求失败 (${error.response?.status}): ${error.response?.data || error.message}`);
+        // 验证API密钥
+        const validation = this.validateApiKey();
+        if (!validation.isValid) {
+          throw new Error(validation.error);
         }
-      } else {
-        console.error('非HTTP错误:', error);
-        throw new Error(`网络错误: ${error instanceof Error ? error.message : '未知错误'}`);
+
+        // 创建对应格式的API客户端
+        const currentClient = createApiClient(authFormat);
+
+        // 构建消息历史
+        const messages = [
+          {
+            role: 'system',
+            content: '你是一个专业的论文写作助手，擅长学术写作、研究方法和论文结构。请用中文回答，提供准确、有用的建议。'
+          }
+        ];
+
+        // 添加上下文消息
+        if (request.context && request.context.length > 0) {
+          messages.push(...request.context);
+        }
+
+        // 添加当前用户消息
+        messages.push({
+          role: 'user',
+          content: request.message
+        });
+
+        const requestData = {
+          model: 'Qwen/Qwen2.5-7B-Instruct',
+          messages,
+          max_tokens: 2000,
+          temperature: 0.7,
+          stream: false
+        };
+
+        console.log(`📤 发送请求到: ${SILICONFLOW_API_URL}/chat/completions`);
+        console.log(`📋 请求数据:`, JSON.stringify(requestData, null, 2));
+
+        const response = await currentClient.post('/chat/completions', requestData);
+
+        console.log(`✅ 认证格式 ${authFormat} 成功！响应状态: ${response.status}`);
+        console.log(`📥 响应数据:`, response.data);
+
+        const choice = response.data.choices[0];
+        return {
+          content: choice.message.content,
+          usage: response.data.usage
+        };
+      } catch (error) {
+        console.error(`❌ 认证格式 ${authFormat} 失败:`, error);
+        lastError = error;
+        
+        // 详细的错误日志
+        if (axios.isAxiosError(error)) {
+          console.error('请求配置:', {
+            url: error.config?.url,
+            method: error.config?.method,
+            headers: error.config?.headers,
+            baseURL: error.config?.baseURL
+          });
+          console.error('响应状态:', error.response?.status);
+          console.error('响应数据:', error.response?.data);
+          console.error('响应头:', error.response?.headers);
+          
+          // 如果是401错误，继续尝试下一种格式
+          if (error.response?.status === 401) {
+            console.log(`🔄 认证格式 ${authFormat} 返回401，尝试下一种格式...`);
+            continue;
+          }
+          // 其他错误直接抛出
+          else if (error.response?.status === 429) {
+            throw new Error('API请求频率超限，请稍后重试');
+          } else if (error.response?.status === 500) {
+            throw new Error('AI服务暂时不可用，请稍后重试');
+          } else if (error.response?.status === 403) {
+            throw new Error('API访问被拒绝，请检查密钥权限');
+          } else {
+            throw new Error(`API请求失败 (${error.response?.status}): ${error.response?.data || error.message}`);
+          }
+        } else {
+          console.error('非HTTP错误:', error);
+          // 网络错误也继续尝试下一种格式
+          continue;
+        }
       }
     }
+    
+    // 所有认证格式都失败了
+    console.error('❌ 所有认证格式都失败了');
+    if (axios.isAxiosError(lastError)) {
+      if (lastError.response?.status === 401) {
+        const validation = this.validateApiKey();
+        console.error('密钥验证结果:', validation);
+        throw new Error(`API密钥无效: ${lastError.response?.data || '所有认证格式都被拒绝'}`);
+      }
+    }
+    throw new Error(`网络错误: ${lastError instanceof Error ? lastError.message : '未知错误'}`);
   }
 
   // AI文本生成

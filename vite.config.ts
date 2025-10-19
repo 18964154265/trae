@@ -24,6 +24,18 @@ export default defineConfig({
     }), 
     tsconfigPaths(),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          fabric: ['fabric'],
+          ui: ['lucide-react', 'sonner']
+        }
+      }
+    },
+    chunkSizeWarningLimit: 1000
+  },
   server: {
     proxy: {
       '/api': {
